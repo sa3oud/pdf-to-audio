@@ -1,6 +1,8 @@
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
+console.log('✅ Script loaded');
+
 // DOM elements
 const fileInput = document.getElementById('fileInput');
 const uploadArea = document.getElementById('uploadArea');
@@ -23,6 +25,14 @@ let extractedText = '';
 let currentUtterance = null;
 let availableVoices = [];
 
+// Helper to show status with console log
+function setStatus(msg, isError = false) {
+  console.log(msg);
+  statusDiv.innerHTML = msg;
+  if (isError) statusDiv.style.background = '#7f1a1a';
+  else statusDiv.style.background = '#0f172a';
+}
+
 // Load voices
 function loadVoices() {
   availableVoices = window.speechSynthesis.getVoices();
@@ -36,6 +46,7 @@ function loadVoices() {
   });
   const preferred = availableVoices.find(v => v.name.includes('Google UK') || v.name.includes('Samantha') || v.name.includes('Microsoft'));
   if (preferred) voiceSelect.value = preferred.name;
+  console.log('Voices loaded:', availableVoices.length);
 }
 
 if (typeof speechSynthesis !== 'undefined') {
@@ -43,84 +54,78 @@ if (typeof speechSynthesis !== 'undefined') {
   loadVoices();
 }
 
-// Drag & drop
+// Drag & drop with debug
 uploadArea.addEventListener('dragover', (e) => {
   e.preventDefault();
   uploadArea.classList.add('drag-over');
+  console.log('drag over');
 });
+
 uploadArea.addEventListener('dragleave', () => {
   uploadArea.classList.remove('drag-over');
 });
+
 uploadArea.addEventListener('drop', (e) => {
   e.preventDefault();
   uploadArea.classList.remove('drag-over');
   const file = e.dataTransfer.files[0];
+  console.log('File dropped:', file?.name, file?.size);
   if (file && file.type === 'application/pdf') handlePDF(file);
-  else statusDiv.textContent = '❌ Please drop a PDF file.';
+  else setStatus('❌ Please drop a PDF file.', true);
 });
 
 fileInput.addEventListener('change', (e) => {
-  if (e.target.files[0]) handlePDF(e.target.files[0]);
+  if (e.target.files[0]) {
+    console.log('File selected:', e.target.files[0].name);
+    handlePDF(e.target.files[0]);
+  }
 });
 
-// Extract text with progress + async pages
+// Extract text with full error trapping
 async function handlePDF(file) {
-  // Check file size (warn if > 50 MB)
-  const sizeMB = file.size / (1024 * 1024);
-  if (sizeMB > 50) {
-    if (!confirm(`This PDF is ${sizeMB.toFixed(1)} MB. Large files may take a while or cause slowdown. Continue?`)) {
-      statusDiv.textContent = '⏹️ Cancelled (file too large).';
-      return;
-    }
-  }
-
-  statusDiv.textContent = '📖 Reading PDF... (this may take a moment for large files)';
-  controlsDiv.style.display = 'none'; // hide old controls while loading
+  setStatus(`📖 Processing "${file.name}" (${(file.size/1024/1024).toFixed(2)} MB)...`);
+  controlsDiv.style.display = 'none';
   
   try {
+    // Validate file
+    if (!file || file.type !== 'application/pdf') {
+      throw new Error('Not a PDF file');
+    }
+    
+    // Read as ArrayBuffer
     const arrayBuffer = await file.arrayBuffer();
+    console.log('ArrayBuffer size:', arrayBuffer.byteLength);
+    
+    // Load PDF document
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     const numPages = pdf.numPages;
+    console.log('PDF loaded, pages:', numPages);
+    
     let fullText = '';
     
-    statusDiv.textContent = `📄 Extracting text from ${numPages} pages... 0%`;
-
-    // Process pages one by one to avoid blocking UI
     for (let i = 1; i <= numPages; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
       const pageText = textContent.items.map(item => item.str).join(' ');
       fullText += pageText + '\n\n';
       
-      // Update progress every few pages
-      if (i % 5 === 0 || i === numPages) {
-        const percent = Math.round((i / numPages) * 100);
-        statusDiv.textContent = `📄 Extracting text... ${percent}% (page ${i}/${numPages})`;
-        // Allow UI to breathe
-        await new Promise(r => setTimeout(r, 10));
+      if (i % 10 === 0 || i === numPages) {
+        setStatus(`📄 Extracted page ${i}/${numPages} (${Math.round(i/numPages*100)}%)`);
+        await new Promise(r => setTimeout(r, 5)); // yield
       }
     }
-
+    
     extractedText = fullText.trim();
-    if (!extractedText) {
-      statusDiv.textContent = '⚠️ No text found in PDF. Try a different file.';
-      controlsDiv.style.display = 'none';
-      return;
-    }
-
+    if (!extractedText) throw new Error('No text found in PDF');
+    
     const wordCount = extractedText.split(/\s+/).length;
     textArea.value = extractedText;
     controlsDiv.style.display = 'block';
-    statusDiv.innerHTML = `✅ Extracted ${wordCount} words from ${numPages} pages. Ready to speak.`;
-    
-    // Warn if very long text (> 50k words) – Web Speech API may cut off
-    if (wordCount > 50000) {
-      statusDiv.innerHTML += `<br>⚠️ Long document detected. Consider splitting into chapters or editing the text for better performance.`;
-    }
+    setStatus(`✅ ${wordCount} words extracted from ${numPages} pages. Ready to speak.`);
     
   } catch (err) {
-    console.error(err);
-    statusDiv.innerHTML = `❌ Error processing PDF: ${err.message || 'Unknown error'}. Make sure the file is a valid PDF.`;
+    console.error('PDF Error:', err);
+    setStatus(`❌ Error: ${err.message || 'Unknown error'}`, true);
     controlsDiv.style.display = 'none';
   }
 }
@@ -130,7 +135,7 @@ editBtn.addEventListener('click', () => {
   textArea.readOnly = false;
   editBtn.style.display = 'none';
   saveEditBtn.style.display = 'inline-block';
-  statusDiv.textContent = '✏️ Edit text as needed, then click Save.';
+  setStatus('✏️ Edit text, then click Save.');
 });
 
 saveEditBtn.addEventListener('click', () => {
@@ -138,62 +143,55 @@ saveEditBtn.addEventListener('click', () => {
   textArea.readOnly = true;
   saveEditBtn.style.display = 'none';
   editBtn.style.display = 'inline-block';
-  statusDiv.textContent = '✅ Text saved.';
+  setStatus('✅ Text saved.');
 });
 
-// Speech functions
+// Speech
 function stopSpeaking() {
   if (window.speechSynthesis.speaking || window.speechSynthesis.paused) {
     window.speechSynthesis.cancel();
   }
   currentUtterance = null;
-  statusDiv.textContent = '⏹️ Stopped.';
+  setStatus('⏹️ Stopped.');
 }
 
 function speakText() {
   if (!extractedText) {
-    statusDiv.textContent = '⚠️ No text to speak. Upload a PDF first.';
+    setStatus('⚠️ No text to speak. Upload a PDF first.', true);
     return;
   }
-
+  
   stopSpeaking();
-
+  
   const utterance = new SpeechSynthesisUtterance(extractedText);
   const selectedVoiceName = voiceSelect.value;
   const voice = availableVoices.find(v => v.name === selectedVoiceName);
   if (voice) utterance.voice = voice;
-
   utterance.rate = parseFloat(rateSlider.value);
   utterance.pitch = parseFloat(pitchSlider.value);
-
-  utterance.onstart = () => {
-    statusDiv.textContent = '🔊 Speaking...';
-    currentUtterance = utterance;
-  };
-  utterance.onend = () => {
-    statusDiv.textContent = '✅ Finished.';
-    currentUtterance = null;
-  };
-  utterance.onerror = (err) => {
+  
+  utterance.onstart = () => { setStatus('🔊 Speaking...'); currentUtterance = utterance; };
+  utterance.onend = () => { setStatus('✅ Finished.'); currentUtterance = null; };
+  utterance.onerror = (err) => { 
     console.error(err);
-    statusDiv.textContent = '❌ Speech error. Try a shorter text or different voice.';
+    setStatus('❌ Speech error. Try shorter text.', true);
     currentUtterance = null;
   };
-
+  
   window.speechSynthesis.speak(utterance);
 }
 
 function pauseSpeaking() {
   if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
     window.speechSynthesis.pause();
-    statusDiv.textContent = '⏸️ Paused.';
+    setStatus('⏸️ Paused.');
   }
 }
 
 function resumeSpeaking() {
   if (window.speechSynthesis.paused) {
     window.speechSynthesis.resume();
-    statusDiv.textContent = '🔊 Speaking...';
+    setStatus('🔊 Speaking...');
   }
 }
 
@@ -202,13 +200,8 @@ pauseBtn.addEventListener('click', pauseSpeaking);
 resumeBtn.addEventListener('click', resumeSpeaking);
 stopBtn.addEventListener('click', stopSpeaking);
 
-rateSlider.addEventListener('input', () => {
-  rateValue.textContent = rateSlider.value;
-});
-pitchSlider.addEventListener('input', () => {
-  pitchValue.textContent = pitchSlider.value;
-});
+rateSlider.addEventListener('input', () => { rateValue.textContent = rateSlider.value; });
+pitchSlider.addEventListener('input', () => { pitchValue.textContent = pitchSlider.value; });
 
-if (availableVoices.length === 0) {
-  setTimeout(loadVoices, 200);
-}
+setStatus('Ready. Upload a PDF file.');
+console.log('Debug script ready');
