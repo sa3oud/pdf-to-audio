@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF to Audio – Free Text-to-Speech</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>📄 PDF to Audio</h1>
+    <p class="subtitle">Upload a PDF, extract text, and listen with natural speech.</p>
+
+    <div class="upload-area" id="uploadArea">
+      <input type="file" id="fileInput" accept=".pdf" />
+      <label for="fileInput" class="file-label">📁 Choose PDF file</label>
+      <p class="file-hint">or drag & drop here</p>
+    </div>
+
+    <div class="controls" id="controls" style="display: none;">
+      <div class="text-preview">
+        <h3>Extracted Text</h3>
+        <textarea id="textContent" rows="8" readonly></textarea>
+        <button id="editBtn" class="secondary">✏️ Edit text</button>
+        <button id="saveEditBtn" class="secondary" style="display: none;">💾 Save edits</button>
+      </div>
+
+      <div class="voice-settings">
+        <h3>Voice Settings</h3>
+        <div class="settings-row">
+          <label>Voice:</label>
+          <select id="voiceSelect"></select>
+        </div>
+        <div class="settings-row">
+          <label>Rate:</label>
+          <input type="range" id="rate" min="0.5" max="2" step="0.1" value="1">
+          <span id="rateValue">1.0</span>
+        </div>
+        <div class="settings-row">
+          <label>Pitch:</label>
+          <input type="range" id="pitch" min="0.5" max="2" step="0.1" value="1">
+          <span id="pitchValue">1.0</span>
+        </div>
+      </div>
+
+      <div class="action-buttons">
+        <button id="speakBtn" class="primary">🔊 Speak</button>
+        <button id="pauseBtn" class="secondary">⏸️ Pause</button>
+        <button id="resumeBtn" class="secondary">▶️ Resume</button>
+        <button id="stopBtn" class="danger">⏹️ Stop</button>
+      </div>
+      <div id="status"></div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
