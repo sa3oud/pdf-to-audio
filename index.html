@@ -3,18 +3,23 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PDF to Audio – Free Text-to-Speech</title>
+  <title>PDF to Audio – OCR for any PDF (Free)</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="container">
     <h1>📄 PDF to Audio</h1>
-    <p class="subtitle">Upload a PDF, extract text, and listen with natural speech.</p>
+    <p class="subtitle">Works with scanned PDFs (OCR) – 100% free, no server</p>
 
     <div class="upload-area" id="uploadArea">
       <input type="file" id="fileInput" accept=".pdf" />
       <label for="fileInput" class="file-label">📁 Choose PDF file</label>
-      <p class="file-hint">or drag & drop here</p>
+      <p class="file-hint">or drag & drop – any size, scanned or text</p>
+    </div>
+
+    <div id="progressContainer" style="display:none;">
+      <progress id="ocrProgress" value="0" max="100"></progress>
+      <p id="progressText">Preparing...</p>
     </div>
 
     <div class="controls" id="controls" style="display: none;">
@@ -54,6 +59,7 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

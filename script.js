@@ -15,13 +15,16 @@ const rateValue = document.getElementById('rateValue');
 const pitchSlider = document.getElementById('pitch');
 const pitchValue = document.getElementById('pitchValue');
 const statusDiv = document.getElementById('status');
-
-// Your live Render backend URL
-const BACKEND_URL = 'https://pdf-to-audio-backend-l3o2.onrender.com/extract-text';
+const progressContainer = document.getElementById('progressContainer');
+const ocrProgress = document.getElementById('ocrProgress');
+const progressText = document.getElementById('progressText');
 
 let extractedText = '';
 let currentUtterance = null;
 let availableVoices = [];
+
+// PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
 function setStatus(msg, isError = false) {
   statusDiv.innerHTML = msg;
@@ -69,40 +72,83 @@ fileInput.addEventListener('change', (e) => {
   if (e.target.files[0]) handlePDF(e.target.files[0]);
 });
 
-// Send PDF to backend
+// Convert PDF page to image (using canvas)
+async function pdfPageToImage(page, scale = 2) {
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: context, viewport }).promise;
+  return canvas;
+}
+
+// OCR using Tesseract.js
+async function ocrImage(canvas, pageNum) {
+  return new Promise((resolve, reject) => {
+    Tesseract.recognize(canvas, 'eng', {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          progressText.innerText = `OCR page ${pageNum}: ${Math.round(m.progress * 100)}%`;
+        }
+      }
+    }).then(({ data: { text } }) => resolve(text))
+      .catch(reject);
+  });
+}
+
+// Main PDF handler with OCR fallback
 async function handlePDF(file) {
-  const sizeMB = file.size / (1024 * 1024);
-  setStatus(`📤 Uploading ${file.name} (${sizeMB.toFixed(1)} MB) to server...`);
+  setStatus(`📖 Loading PDF...`);
   controlsDiv.style.display = 'none';
+  progressContainer.style.display = 'block';
+  ocrProgress.value = 0;
   
-  const formData = new FormData();
-  formData.append('pdf', file);
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const numPages = pdf.numPages;
+  let fullText = '';
+  let usedOCR = false;
   
-  try {
-    const response = await fetch(BACKEND_URL, {
-      method: 'POST',
-      body: formData,
-    });
-    
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || `Server error: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    extractedText = data.text;
-    textArea.value = extractedText;
-    controlsDiv.style.display = 'block';
-    setStatus(`✅ Extracted ${data.wordCount} words from ${data.pageCount} pages. Ready to speak.`);
-    
-    if (data.wordCount > 50000) {
-      setStatus(`⚠️ Long document (${data.wordCount} words). Speech may be truncated.`, false);
-    }
-  } catch (err) {
-    console.error(err);
-    setStatus(`❌ Error: ${err.message}`, true);
-    controlsDiv.style.display = 'none';
+  // First try regular text extraction (fast)
+  setStatus(`Extracting text from ${numPages} pages...`);
+  for (let i = 1; i <= numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items.map(item => item.str).join(' ');
+    fullText += pageText + '\n\n';
+    ocrProgress.value = (i / numPages) * 100;
+    progressText.innerText = `Extracting page ${i}/${numPages}`;
   }
+  
+  // If little or no text, run OCR on each page
+  if (fullText.trim().length < 100) {
+    setStatus(`📸 Low text detected – running OCR (this may take a while)...`);
+    usedOCR = true;
+    fullText = '';
+    for (let i = 1; i <= numPages; i++) {
+      progressText.innerText = `Converting page ${i}/${numPages} to image...`;
+      const page = await pdf.getPage(i);
+      const canvas = await pdfPageToImage(page);
+      progressText.innerText = `OCR page ${i}/${numPages}...`;
+      const ocrText = await ocrImage(canvas, i);
+      fullText += ocrText + '\n\n';
+      ocrProgress.value = (i / numPages) * 100;
+    }
+  }
+  
+  extractedText = fullText.trim();
+  if (!extractedText) {
+    setStatus('❌ No text found even after OCR. The PDF may be corrupted or password-protected.', true);
+    progressContainer.style.display = 'none';
+    return;
+  }
+  
+  const wordCount = extractedText.split(/\s+/).length;
+  textArea.value = extractedText;
+  controlsDiv.style.display = 'block';
+  progressContainer.style.display = 'none';
+  setStatus(`✅ ${wordCount} words extracted${usedOCR ? ' using OCR' : ''}. Ready to speak.`);
 }
 
 // Edit mode
@@ -120,7 +166,7 @@ saveEditBtn.addEventListener('click', () => {
   setStatus('✅ Text saved.');
 });
 
-// Speech
+// Speech functions
 function stopSpeaking() {
   if (window.speechSynthesis.speaking || window.speechSynthesis.paused) {
     window.speechSynthesis.cancel();
@@ -169,4 +215,4 @@ stopBtn.addEventListener('click', stopSpeaking);
 rateSlider.addEventListener('input', () => { rateValue.textContent = rateSlider.value; });
 pitchSlider.addEventListener('input', () => { pitchValue.textContent = pitchSlider.value; });
 
-setStatus('Ready. Upload any PDF (no size limit, server-side processing).');
+setStatus('Ready. Upload any PDF – scanned or text – fully free.');
