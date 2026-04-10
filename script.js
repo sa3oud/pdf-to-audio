@@ -23,11 +23,10 @@ let extractedText = '';
 let currentUtterance = null;
 let availableVoices = [];
 
-// Load voices and populate select
+// Load voices
 function loadVoices() {
   availableVoices = window.speechSynthesis.getVoices();
   voiceSelect.innerHTML = '';
-  // Filter for English voices (optional)
   const englishVoices = availableVoices.filter(v => v.lang.startsWith('en'));
   (englishVoices.length ? englishVoices : availableVoices).forEach(voice => {
     const option = document.createElement('option');
@@ -35,18 +34,16 @@ function loadVoices() {
     option.textContent = `${voice.name} (${voice.lang})`;
     voiceSelect.appendChild(option);
   });
-  // Prefer a natural voice if available
   const preferred = availableVoices.find(v => v.name.includes('Google UK') || v.name.includes('Samantha') || v.name.includes('Microsoft'));
   if (preferred) voiceSelect.value = preferred.name;
 }
 
-// Chrome loads voices asynchronously
 if (typeof speechSynthesis !== 'undefined') {
   speechSynthesis.onvoiceschanged = loadVoices;
   loadVoices();
 }
 
-// Drag & drop handling
+// Drag & drop
 uploadArea.addEventListener('dragover', (e) => {
   e.preventDefault();
   uploadArea.classList.add('drag-over');
@@ -59,35 +56,73 @@ uploadArea.addEventListener('drop', (e) => {
   uploadArea.classList.remove('drag-over');
   const file = e.dataTransfer.files[0];
   if (file && file.type === 'application/pdf') handlePDF(file);
+  else statusDiv.textContent = '❌ Please drop a PDF file.';
 });
 
 fileInput.addEventListener('change', (e) => {
   if (e.target.files[0]) handlePDF(e.target.files[0]);
 });
 
-// Extract text from PDF using PDF.js
+// Extract text with progress + async pages
 async function handlePDF(file) {
-  statusDiv.textContent = '📖 Reading PDF...';
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  let fullText = '';
-
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const textContent = await page.getTextContent();
-    const pageText = textContent.items.map(item => item.str).join(' ');
-    fullText += pageText + '\n\n';
+  // Check file size (warn if > 50 MB)
+  const sizeMB = file.size / (1024 * 1024);
+  if (sizeMB > 50) {
+    if (!confirm(`This PDF is ${sizeMB.toFixed(1)} MB. Large files may take a while or cause slowdown. Continue?`)) {
+      statusDiv.textContent = '⏹️ Cancelled (file too large).';
+      return;
+    }
   }
 
-  extractedText = fullText.trim();
-  if (!extractedText) {
-    statusDiv.textContent = '⚠️ No text found in PDF. Try a different file.';
-    return;
-  }
+  statusDiv.textContent = '📖 Reading PDF... (this may take a moment for large files)';
+  controlsDiv.style.display = 'none'; // hide old controls while loading
+  
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const numPages = pdf.numPages;
+    let fullText = '';
+    
+    statusDiv.textContent = `📄 Extracting text from ${numPages} pages... 0%`;
 
-  textArea.value = extractedText;
-  controlsDiv.style.display = 'block';
-  statusDiv.textContent = `✅ Extracted ${extractedText.split(/\s+/).length} words. Ready to speak.`;
+    // Process pages one by one to avoid blocking UI
+    for (let i = 1; i <= numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map(item => item.str).join(' ');
+      fullText += pageText + '\n\n';
+      
+      // Update progress every few pages
+      if (i % 5 === 0 || i === numPages) {
+        const percent = Math.round((i / numPages) * 100);
+        statusDiv.textContent = `📄 Extracting text... ${percent}% (page ${i}/${numPages})`;
+        // Allow UI to breathe
+        await new Promise(r => setTimeout(r, 10));
+      }
+    }
+
+    extractedText = fullText.trim();
+    if (!extractedText) {
+      statusDiv.textContent = '⚠️ No text found in PDF. Try a different file.';
+      controlsDiv.style.display = 'none';
+      return;
+    }
+
+    const wordCount = extractedText.split(/\s+/).length;
+    textArea.value = extractedText;
+    controlsDiv.style.display = 'block';
+    statusDiv.innerHTML = `✅ Extracted ${wordCount} words from ${numPages} pages. Ready to speak.`;
+    
+    // Warn if very long text (> 50k words) – Web Speech API may cut off
+    if (wordCount > 50000) {
+      statusDiv.innerHTML += `<br>⚠️ Long document detected. Consider splitting into chapters or editing the text for better performance.`;
+    }
+    
+  } catch (err) {
+    console.error(err);
+    statusDiv.innerHTML = `❌ Error processing PDF: ${err.message || 'Unknown error'}. Make sure the file is a valid PDF.`;
+    controlsDiv.style.display = 'none';
+  }
 }
 
 // Edit mode
@@ -121,10 +156,9 @@ function speakText() {
     return;
   }
 
-  stopSpeaking(); // cancel any ongoing speech
+  stopSpeaking();
 
   const utterance = new SpeechSynthesisUtterance(extractedText);
-  // Set voice
   const selectedVoiceName = voiceSelect.value;
   const voice = availableVoices.find(v => v.name === selectedVoiceName);
   if (voice) utterance.voice = voice;
@@ -142,7 +176,7 @@ function speakText() {
   };
   utterance.onerror = (err) => {
     console.error(err);
-    statusDiv.textContent = '❌ Speech error.';
+    statusDiv.textContent = '❌ Speech error. Try a shorter text or different voice.';
     currentUtterance = null;
   };
 
@@ -163,7 +197,6 @@ function resumeSpeaking() {
   }
 }
 
-// Event listeners
 speakBtn.addEventListener('click', speakText);
 pauseBtn.addEventListener('click', pauseSpeaking);
 resumeBtn.addEventListener('click', resumeSpeaking);
@@ -176,7 +209,6 @@ pitchSlider.addEventListener('input', () => {
   pitchValue.textContent = pitchSlider.value;
 });
 
-// Initial voice loading fallback
 if (availableVoices.length === 0) {
   setTimeout(loadVoices, 200);
 }
